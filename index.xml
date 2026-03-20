@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="DeHumanizer Pro">
+  <category name="Scripts">
+    <reapack name="dehumanizer-pro.lua" type="script" desc="DeHumanizer Pro">
+      <metadata>
+        <description><![CDATA[{\rtf1 DeHumanizer Pro\par
+Intentional dynamics shaping for modern drum programming.\par
+\par
+Two independent engines:\par
+\par
+VELOCITY ENGINE — Drawable curve canvas for shaping velocity across a phrase. Role-aware targeting, live preview, drift tension, phrase reset logic, and full persistence.\par
+\par
+TIMING ENGINE — Per-role lean (rush/drag) and scatter with biased bell-curve distribution. Drawable per-role scatter curves for phrase-position-aware timing variance. Beat-aware tightening keeps downbeats locked. Tempo-aware PPQ math and BPM-aware tooltips.\par
+\par
+Requires ReaImGui.}]]></description>
+        <link rel="website">https://deadpixeldesign.com</link>
+      </metadata>
+      <version name="4.3" author="Dead Pixel Design" time="2025-05-01T00:00:00Z">
+        <changelog><![CDATA[Initial public release.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/wretcher207/Dehumanizer-Pro/main/Scripts/dehumanizer-pro.lua</source>
+      </version>
+      <version name="4.4" author="Dead Pixel Design" time="2025-05-15T00:00:00Z">
+        <changelog><![CDATA[* Fixed: Learn from Selection (was "Learn Pitch")
+* Fixed: nil velocity crash on edge cases
+* Fixed: phrase boundary reset logic
+* Removed: orphaned state variables]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/wretcher207/Dehumanizer-Pro/main/Scripts/dehumanizer-pro.lua</source>
+      </version>
+      <version name="4.5" author="Dead Pixel Design" time="2025-06-01T00:00:00Z">
+        <changelog><![CDATA[* Added: velocity preview (orange dots overlaid on canvas)
+* Added: curve persistence across sessions
+* Added: mouse interpolation for smooth curve painting
+* Added: right-click erase on curve canvas
+* Added: canvas legend (Original / Preview / LMB:draw / RMB:erase)]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/wretcher207/Dehumanizer-Pro/main/Scripts/dehumanizer-pro.lua</source>
+      </version>
+      <version name="5.4" author="Dead Pixel Design" time="2026-03-20T00:00:00Z">
+        <changelog><![CDATA[* Renamed: "PROCESS PHRASE" button is now "APPLY VELOCITY" for clarity alongside "APPLY TIMING"
+* Added: visible section header above velocity curve area (VELOCITY SHAPING)
+* Added: visible section header above timing engine section (TIMING ENGINE)
+* Added: axis context hint on velocity canvas ("Draw velocity shape: bottom = Min Vel, top = Max Vel")
+* Fixed: reduced default window height from 860 to 640 so APPLY TIMING button is visible without scrolling
+* Verified: velocity canvas and per-role timing variance canvases use independent ImGui IDs (no interaction bleed)
+* Updated: window title and script header to v5.4]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/wretcher207/Dehumanizer-Pro/main/Scripts/dehumanizer-pro.lua</source>
+      </version>
+    </reapack>
+  </category>
+</index>
