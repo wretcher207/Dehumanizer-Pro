@@ -1,3 +1,12 @@
+> **ReaPack users:** This script is now distributed through the unified Dead Pixel Design repository.
+> Add this URL in REAPER under `Extensions → ReaPack → Import repositories`:
+> ```
+> https://raw.githubusercontent.com/wretcher207/dead-pixel-design/main/index.xml
+> ```
+> The `index.xml` in this repo is preserved for backward compatibility but will not receive new entries.
+
+---
+
 # DeHumanizer Pro
 
 ![REAPER](https://img.shields.io/badge/REAPER-6%2B-green?style=flat-square)
@@ -52,7 +61,7 @@ Most humanizers spray random jitter across your MIDI and call it "feel." DeHuman
 2. Go to `Extensions → ReaPack → Import repositories…`
 3. Paste this URL:
    ```
-   https://raw.githubusercontent.com/wretcher207/Dehumanizer-Pro/main/index.xml
+   https://raw.githubusercontent.com/wretcher207/dead-pixel-design/main/index.xml
    ```
 4. Click OK, then `Extensions → ReaPack → Browse packages`
 5. Search **DeHumanizer Pro**, right-click → Install
@@ -94,6 +103,6 @@ Most humanizers spray random jitter across your MIDI and call it "feel." DeHuman
 
 ## About
 
-Built by **[Dead Pixel Design](https://deadpixeldesign.com)** — *we don't optimize, we haunt.*
+Built by **[Dead Pixel Design](https://www.deadpixeldesign.com)** — *we don't optimize, we haunt.*
 
 © 2026 Dead Pixel Design

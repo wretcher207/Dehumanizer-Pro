@@ -2,7 +2,7 @@
 -- @version 5.4
 -- @author Dead Pixel Design
 -- @links
---   Website https://deadpixeldesign.com
+--   Website https://www.deadpixeldesign.com
 -- @about
 --   # DeHumanizer Pro
 --   Intentional dynamics shaping for modern drum programming.
