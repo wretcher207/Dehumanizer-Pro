@@ -33,6 +33,8 @@ local CONFIG = {
   phrase_gap_qn        = 1.0,
   max_lean_ms          = 15,
   max_variance_ms      = 15,
+  max_dev_pct          = 0.12,
+  drift_decay          = 0.95,
 }
 
 local ROLE_MAP = {
@@ -224,45 +226,77 @@ end
 
 -- ================= VELOCITY HUMANIZER =================
 
-local function humanize(notes, min_p, max_p, role, minv, maxv, drift, curve, strength)
-  local total_range = max_p - min_p
-  if total_range <= 0 then total_range = 1 end
-  local drift_off, last_vel, last_qn = 0, -1, -1
-  local max_dev = (maxv - minv) * 0.12
-  for _, n in ipairs(notes) do
-    if is_note_in_role(n.pitch, role) then
-      if last_qn ~= -1 and (n.qn - last_qn) > CONFIG.phrase_gap_qn then
-        drift_off = 0
-        last_vel  = -1
-      end
-      local t     = (n.ppq - min_p) / total_range
-      local c_idx = clamp(math.floor(t * (#curve - 1)) + 1, 1, #curve)
-      local target_vel = lerp(minv, maxv, curve[c_idx])
-      local vel = lerp(n.orig_vel, target_vel, strength)
-      drift_off = clamp((drift_off + math.random(-2, 2)) * 0.95, -drift, drift)
-      vel = vel + drift_off + rand_var(max_dev)
-      if math.abs(vel - last_vel) < CONFIG.golden_rule_min_diff then
-        vel = vel + (math.random() > 0.5 and CONFIG.golden_rule_min_diff or -CONFIG.golden_rule_min_diff)
-      end
-      n.new_vel = clamp(round(vel), 1, 127)
-      last_vel, last_qn = n.new_vel, n.qn
-    end
+-- Seedable LCG. The preview needs a stable random stream so dots don't
+-- flicker every frame; math.random() is process-global and can't give that.
+local function make_rng(seed)
+  local s = seed % 2147483648
+  if s == 0 then s = 1 end
+  local r = {}
+  function r:next()
+    s = (s * 1103515245 + 12345) % 2147483648
+    return s / 2147483648
   end
+  function r:int(lo, hi)
+    return lo + math.floor(self:next() * (hi - lo + 1))
+  end
+  function r:tri(range)
+    return ((self:next() + self:next() + self:next()) / 3 * 2 - 1) * range
+  end
+  return r
 end
 
-local function preview_humanize(notes, min_p, max_p, role, minv, maxv, curve, strength)
+-- Hash params + a sample of the curve so the preview seed is stable as long
+-- as the inputs are. Any control change reseeds and the preview updates.
+local function preview_seed(note_count, minv, maxv, drift, strength, curve)
+  local s = note_count
+        + minv  * 7
+        + maxv  * 31
+        + drift * 13
+        + math.floor(strength * 1000) * 17
+  for i = 1, #curve, 32 do
+    s = s + math.floor(curve[i] * 10000) * 3
+  end
+  return s
+end
+
+-- Single computation path used by BOTH preview rendering and APPLY. Returns
+-- an array of {idx, ppq, vel}. The old code had a separate preview_humanize
+-- that omitted drift / max_dev / the golden-rule bump, so the preview dots
+-- did not match what APPLY produced.
+local function compute_velocities(notes, min_p, max_p, role,
+                                  minv, maxv, drift, curve, strength, rng)
   local total_range = max_p - min_p
   if total_range <= 0 then total_range = 1 end
-  local result = {}
+  local max_dev   = (maxv - minv) * CONFIG.max_dev_pct
+  local drift_off = 0
+  local last_vel  = nil
+  local last_qn   = nil
+  local out = {}
   for _, n in ipairs(notes) do
     if is_note_in_role(n.pitch, role) then
-      local t     = (n.ppq - min_p) / total_range
-      local c_idx = clamp(math.floor(t * (#curve - 1)) + 1, 1, #curve)
-      local vel   = lerp(n.orig_vel, lerp(minv, maxv, curve[c_idx]), strength)
-      result[#result + 1] = {ppq = n.ppq, vel = clamp(round(vel), 1, 127)}
+      if last_qn and (n.qn - last_qn) > CONFIG.phrase_gap_qn then
+        drift_off, last_vel = 0, nil
+      end
+      local t      = (n.ppq - min_p) / total_range
+      local c_idx  = clamp(math.floor(t * (#curve - 1)) + 1, 1, #curve)
+      local target = lerp(minv, maxv, curve[c_idx])
+      local vel    = lerp(n.orig_vel, target, strength)
+      drift_off = clamp((drift_off + rng:int(-2, 2)) * CONFIG.drift_decay,
+                        -drift, drift)
+      vel = vel + drift_off + rng:tri(max_dev)
+      if last_vel and math.abs(vel - last_vel) < CONFIG.golden_rule_min_diff then
+        -- Push AWAY from last_vel. The old bump used a random sign which
+        -- could leave vel even closer to last_vel than before the "fix".
+        local dir = (vel >= last_vel) and 1 or -1
+        vel = last_vel + dir * CONFIG.golden_rule_min_diff
+      end
+      vel = clamp(round(vel), 1, 127)
+      out[#out + 1] = {idx = n.idx, ppq = n.ppq, vel = vel}
+      last_vel = vel
+      last_qn  = n.qn
     end
   end
-  return result
+  return out
 end
 
 -- ================= TIMING ENGINE =================
@@ -489,7 +523,10 @@ local function run()
               reaper.ImGui_DrawList_AddCircleFilled(dl, nx, ny, 2.0, col)
               lq = n.qn
             end
-            local preview = preview_humanize(notes, min_p, max_p, active_role, minv, maxv, curve, strength)
+            local pv_seed = preview_seed(#notes, minv, maxv, drift, strength, curve)
+            local preview = compute_velocities(notes, min_p, max_p, active_role,
+                                               minv, maxv, drift, curve, strength,
+                                               make_rng(pv_seed))
             for _, p in ipairs(preview) do
               local px = x + ((p.ppq - min_p) / tr) * w
               local py = y + (1 - (p.vel / 127)) * h
@@ -561,15 +598,21 @@ local function run()
           reaper.ImGui_SameLine(ctx)
           if reaper.ImGui_Button(ctx, "APPLY VELOCITY", -1, 40) then
             reaper.Undo_BeginBlock()
-            humanize(notes, min_p, max_p, active_role, minv, maxv, drift, curve, strength)
+            -- Refetch so APPLY operates on the CURRENT selection, not the
+            -- snapshot taken at the top of the frame.
+            local fresh_notes, fmin, fmax = get_notes(take)
+            local apply_seed = math.floor(reaper.time_precise() * 1000000) + os.time()
+            local results = compute_velocities(fresh_notes, fmin, fmax, active_role,
+                                               minv, maxv, drift, curve, strength,
+                                               make_rng(apply_seed))
             reaper.MIDI_DisableSort(take)
-            for _, n in ipairs(notes) do
-              if n.new_vel then
-                reaper.MIDI_SetNote(take, n.idx, nil, nil, nil, nil, nil, nil, n.new_vel, false)
-              end
+            for _, r in ipairs(results) do
+              reaper.MIDI_SetNote(take, r.idx, nil, nil, nil, nil, nil, nil, r.vel, false)
             end
             reaper.MIDI_Sort(take)
-            reaper.Undo_EndBlock("DeHumanizer Pro: Velocity", -1)
+            -- UNDO_STATE_ITEMS = 4. Old code used -1 (all flags) which made
+            -- every APPLY snapshot the full project, bloating undo state.
+            reaper.Undo_EndBlock("DeHumanizer Pro: Velocity", 4)
           end
 
           -- ===== TIMING ENGINE SECTION =====
@@ -732,7 +775,8 @@ local function run()
                 end
               end
               reaper.MIDI_Sort(take)
-              reaper.Undo_EndBlock("DeHumanizer Pro: Timing", -1)
+              -- UNDO_STATE_ITEMS = 4. See velocity APPLY for rationale.
+              reaper.Undo_EndBlock("DeHumanizer Pro: Timing", 4)
             end
 
           end -- timing_open
