@@ -47,6 +47,43 @@ local ROLE_MAP = {
 local ROLES            = {"Kicks","Snare","Hihat","Ride","Toms","Cymbals","All"}
 local TIMING_ROLE_KEYS = {"Kicks","Snare","Hihat","Ride","Toms","Cymbals"}
 
+-- ================= LIFECYCLE =================
+
+-- Singleton heartbeat. The script defers a render loop and creates a
+-- ReaImGui context per run(). Re-firing the action while a previous run
+-- is still alive opens a second window with its own context. The previous
+-- run stamps the current time every frame; a new run only starts if the
+-- last stamp is older than the timeout (i.e. the previous run died).
+local SINGLETON_KEY     = "instance_heartbeat"
+local SINGLETON_TIMEOUT = 2.0  -- seconds
+
+local function singleton_can_start()
+  local last = tonumber(reaper.GetExtState(SCRIPT_ID, SINGLETON_KEY)) or 0
+  return (reaper.time_precise() - last) > SINGLETON_TIMEOUT
+end
+
+local function singleton_stamp()
+  reaper.SetExtState(SCRIPT_ID, SINGLETON_KEY,
+                     tostring(reaper.time_precise()), false)
+end
+
+local function singleton_release()
+  reaper.DeleteExtState(SCRIPT_ID, SINGLETON_KEY, false)
+end
+
+reaper.atexit(singleton_release)
+
+-- Cached ImGui context. Only useful when the Lua state persists across
+-- re-runs (some ReaScript hosts reuse state). When it doesn't, _ctx starts
+-- nil and we create one cleanly. ValidatePtr guards a stale ref.
+local _ctx
+local function get_ctx()
+  if not _ctx or not reaper.ImGui_ValidatePtr(_ctx, "ImGui_Context*") then
+    _ctx = reaper.ImGui_CreateContext("DeHumanizer Pro v5.4")
+  end
+  return _ctx
+end
+
 -- ================= DATA PERSISTENCE =================
 
 local function serialize_curve(curve)
@@ -99,6 +136,14 @@ local function save_settings(data)
       end
     end
   end
+  -- Persist role -> pitch mappings (mutated by "Learn from Selection")
+  for _, role in ipairs(TIMING_ROLE_KEYS) do
+    local pitches = ROLE_MAP[role]
+    if pitches then
+      reaper.SetExtState(SCRIPT_ID, "rolemap_" .. role,
+                         table.concat(pitches, ","), true)
+    end
+  end
 end
 
 local function load_settings()
@@ -130,6 +175,19 @@ local function load_settings()
       local default_tvc = {}
       for i = 1, CONFIG.curve_points do default_tvc[i] = 0.5 end
       settings.timing_var_curve[role] = default_tvc
+    end
+  end
+  -- Side effect: restore module-level ROLE_MAP from persisted "Learn from
+  -- Selection" data. Roles with no stored entry keep their built-in defaults.
+  for _, role in ipairs(TIMING_ROLE_KEYS) do
+    local rm = reaper.GetExtState(SCRIPT_ID, "rolemap_" .. role)
+    if rm and rm ~= "" then
+      local pitches = {}
+      for p in rm:gmatch("[^,]+") do
+        local n = tonumber(p)
+        if n then pitches[#pitches + 1] = n end
+      end
+      if #pitches > 0 then ROLE_MAP[role] = pitches end
     end
   end
   return settings
@@ -322,12 +380,19 @@ end
 -- ================= MAIN GUI =================
 
 local function run()
+  if not singleton_can_start() then
+    reaper.MB("DeHumanizer Pro is already running.\n" ..
+              "Close the existing window before launching a new one.",
+              "DeHumanizer Pro", 0)
+    return
+  end
+
   local me = reaper.MIDIEditor_GetActive()
   if not me then return end
   local take = reaper.MIDIEditor_GetTake(me)
   if not take then return end
 
-  local ctx = reaper.ImGui_CreateContext("DeHumanizer Pro v5.4")
+  local ctx = get_ctx()
 
   local saved    = load_settings()
   local role_idx = #ROLES - 1
@@ -384,6 +449,9 @@ local function run()
   local last_error = nil
 
   local function loop()
+    -- Stamp heartbeat so a duplicate launch can detect we're alive.
+    singleton_stamp()
+
     -- Re-validate take every frame BEFORE calling ImGui_Begin.
     local active_me = reaper.MIDIEditor_GetActive()
     if active_me then
@@ -451,6 +519,12 @@ local function run()
                   end
                 end
                 if learned_any then
+                  -- Persist immediately so the new mapping survives a Reaper
+                  -- restart even if the user never clicks "Save Settings".
+                  save_settings({
+                    minv=minv, maxv=maxv, drift=drift, strength=strength,
+                    curve=curve, timing=timing, timing_var_curve=timing_var_curve,
+                  })
                   reaper.ShowConsoleMsg("DeHumanizer: Learned new pitch(es) for " .. active_role .. "\n")
                 else
                   reaper.ShowConsoleMsg("DeHumanizer: No new pitches to learn (already mapped or none selected)\n")
