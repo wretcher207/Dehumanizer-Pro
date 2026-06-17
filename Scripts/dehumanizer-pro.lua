@@ -267,13 +267,20 @@ end
 
 -- ================= TIMING ENGINE =================
 
+-- Convert a millisecond offset, evaluated at ppq_pos, into a PPQ delta that
+-- respects project tempo automation. The old apply_timing derived a single
+-- ppq_per_ms ratio from Master_GetTempo() and reused it for every note,
+-- which is wrong as soon as the project has tempo changes mid-item.
+-- Round-tripping through project time is the only way to stay accurate
+-- across tempo curves. Costs 2 API calls per note (APPLY-time only).
+local function ms_offset_to_ppq(take, ppq_pos, offset_ms)
+  local t_sec      = reaper.MIDI_GetProjTimeFromPPQPos(take, ppq_pos)
+  local target_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, t_sec + offset_ms * 0.001)
+  return target_ppq - ppq_pos
+end
+
 local function apply_timing(take, notes, timing_settings, timing_var_curve)
-  local bpm          = reaper.Master_GetTempo()
-  local ms_per_beat  = 60000.0 / bpm
-  local ppq_per_beat = reaper.MIDI_GetPPQPosFromProjQN(take, 1) -
-                       reaper.MIDI_GetPPQPosFromProjQN(take, 0)
-  local ppq_per_ms   = ppq_per_beat / ms_per_beat
-  local pitch_role   = build_pitch_role_lookup()
+  local pitch_role = build_pitch_role_lookup()
 
   -- Compute min/max PPQ from notes for normalized phrase position
   local min_p, max_p = math.huge, 0
@@ -302,7 +309,11 @@ local function apply_timing(take, notes, timing_settings, timing_var_curve)
         local frac    = n.qn - math.floor(n.qn)
         local on_beat = (frac < 0.1 or frac > 0.9)
         local eff_var = scaled_variance * (on_beat and 0.3 or 1.0)
-        local offset_ppq = biased_rand_timing(ts.lean_ms, eff_var) * ppq_per_ms
+        -- Per-note tempo lookup. Note duration is preserved in PPQ, which
+        -- keeps musical-grid duration even across a tempo change inside the
+        -- note. Only the start gets the per-note ms->PPQ adjustment.
+        local offset_ms  = biased_rand_timing(ts.lean_ms, eff_var)
+        local offset_ppq = ms_offset_to_ppq(take, n.ppq, offset_ms)
         local new_start  = math.max(0, n.ppq + offset_ppq)
         n.new_ppq    = new_start
         n.new_endppq = new_start + (n.endppq - n.ppq)
